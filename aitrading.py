@@ -6,12 +6,26 @@ import pandas as pd
 st.set_page_config(page_title="Sinyal Trading Real-Time", layout="centered")
 st.title("📈 Sinyal Trading Real-Time (MA Crossover)")
 
-# Input simbol
-symbol = st.text_input("Masukkan Symbol (contoh: XAUUSD=X untuk Gold, EURUSD=X, BTC-USD, AAPL)", value="XAUUSD=X")
-interval = st.selectbox("Interval Data", ["1m", "5m", "15m", "1h", "1d"])
-period = st.selectbox("Periode Data", ["1d", "5d", "7d", "1mo", "3mo"])
+# Input simbol (XAUUSD diganti GLD sebagai representasi emas)
+symbol = st.text_input("Masukkan Symbol (contoh: GLD, BTC-USD, EURUSD=X, AAPL)", value="GLD")
 
-# Ambil data dari Yahoo Finance
+# Interval dan periode yang umum tersedia
+interval = st.selectbox("Interval Data", ["1d", "1h", "15m", "5m"])
+period = st.selectbox("Periode Data", ["5d", "7d", "1mo", "3mo"])
+
+# Validasi symbol & interval (biar gak error)
+supported_symbols = {
+    "1d": ["GLD", "AAPL", "BTC-USD", "EURUSD=X", "JPY=X"],
+    "1h": ["AAPL", "BTC-USD"],
+    "15m": ["AAPL", "BTC-USD"],
+    "5m": ["AAPL", "BTC-USD"]
+}
+
+if symbol not in supported_symbols.get(interval, []):
+    st.warning(f"⚠️ Symbol '{symbol}' tidak tersedia untuk interval '{interval}' di Yahoo Finance. Silakan ganti symbol atau interval.")
+    st.stop()
+
+# Ambil data harga
 @st.cache_data(ttl=60)
 def get_data(symbol, period, interval):
     data = yf.download(tickers=symbol, period=period, interval=interval)
@@ -27,12 +41,12 @@ try:
         df["MA5"] = df["Close"].rolling(window=5).mean()
         df["MA20"] = df["Close"].rolling(window=20).mean()
 
-        # Tampilkan chart harga
+        # Grafik harga
         st.subheader("📊 Grafik Harga & Moving Average")
         chart_data = df[["Close", "MA5", "MA20"]].dropna()
         st.line_chart(chart_data)
 
-        # Deteksi sinyal
+        # Fungsi sinyal MA crossover
         def get_signal(data):
             if len(data) < 21:
                 return "Data tidak cukup"
@@ -45,6 +59,7 @@ try:
 
         signal = get_signal(df)
 
+        # Output sinyal
         st.subheader("📣 Sinyal Saat Ini:")
         st.markdown(f"<h2 style='color: green;'>{signal}</h2>" if "BUY" in signal else
                     f"<h2 style='color: red;'>{signal}</h2>" if "SELL" in signal else
