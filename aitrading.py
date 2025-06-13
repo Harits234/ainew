@@ -3,71 +3,73 @@ import asyncio
 import websockets
 import json
 import numpy as np
-from collections import deque
 import threading
+import requests
+from collections import deque
 
-st.set_page_config(page_title="📡 Sinyal Trading MA", layout="centered")
-st.title("📈 Realtime Sinyal Trading - Moving Average")
+st.set_page_config(page_title="📡 Scalping Signal - Telegram", layout="centered")
+st.title("📈 AI TRADING The Pip Mafia")
 
-# Input UI
-symbol = st.selectbox("Pilih Pair", ["frxXAUUSD", "frxUSDJPY", "frxEURUSD", "R_100"], index=0)
-ma_period = st.slider("MA Period", 3, 20, 5)
+# State & memory
+if "telegram_ids" not in st.session_state:
+    st.session_state.telegram_ids = set()
+if "running" not in st.session_state:
+    st.session_state.running = False
 
-# State
-prices = deque(maxlen=ma_period)
-last_signal = st.session_state.get("last_signal", "NONE")
-prev_price = None
-prev_ma = None
+# UI: input telegram id
+telegram_input = st.text_input("Masukkan ID Telegram Anda (maks 5 pengguna)")
+pair = st.selectbox("Pilih Pair", ["frxXAUUSD", "frxUSDJPY", "frxEURUSD", "R_100"])
 
-# Placeholder UI
-price_ph = st.empty()
-ma_ph = st.empty()
-signal_ph = st.empty()
+if st.button("Daftar & Jalankan Bot"):
+    if len(st.session_state.telegram_ids) >= 5:
+        st.error("⚠️ Maksimal 5 ID Telegram")
+    else:
+        st.session_state.telegram_ids.add(telegram_input)
+        st.session_state.running = True
+        st.success(f"✅ ID {telegram_input} didaftarkan!")
 
-# Realtime WebSocket Handler
-def start_deriv_ws():
-    async def deriv_stream():
-        global prev_price, prev_ma, last_signal
-        uri = "wss://ws.binaryws.com/websockets/v3?app_id=1089"
-        async with websockets.connect(uri) as ws:
-            await ws.send(json.dumps({"ticks": symbol}))
-            while True:
-                msg = json.loads(await ws.recv())
-                if "tick" in msg:
-                    price = float(msg["tick"]["quote"])
-                    prices.append(price)
-                    price_ph.metric("Harga", f"{price:.2f}")
+# Constants
+MA_FAST = 50
+MA_SLOW = 200
+prices = deque(maxlen=MA_SLOW)
+last_signal = None
 
-                    if len(prices) == ma_period:
-                        ma_val = np.mean(prices)
-                        ma_ph.markdown(f"**MA({ma_period})** = `{ma_val:.2f}`")
+TELEGRAM_BOT_TOKEN = "8125493408:AAGnuSkf_BwscznH9B_gjzSTNOrVgSd0jos"
 
-                        signal = "NONE"
-                        if prev_price and prev_ma:
-                            if prev_price < prev_ma and price > ma_val:
-                                signal = "BUY"
-                            elif prev_price > prev_ma and price < ma_val:
-                                signal = "SELL"
+def send_telegram_signal(signal, price, pair):
+    for user_id in st.session_state.telegram_ids:
+        message = f"\n📉 *Sinyal Scalping - {pair}*\n🔔 *Sinyal:* {signal}\n💰 *Harga:* {price:.2f}\n📊 *Strategi:* MA50/200 Cross"
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+        payload = {"chat_id": user_id, "text": message, "parse_mode": "Markdown"}
+        requests.post(url, data=payload)
 
-                        if signal != "NONE" and signal != last_signal:
-                            signal_ph.success(f'<div id="signal">💡 <b>Sinyal:</b> {signal}</div>', unsafe_allow_html=True)
-                            st.markdown(
-                                """
-                                <script>
-                                    document.getElementById("signal").scrollIntoView({ behavior: 'smooth' });
-                                </script>
-                                """,
-                                unsafe_allow_html=True
-                            )
-                            st.session_state["last_signal"] = signal
-                            last_signal = signal
+# WebSocket Deriv
+async def deriv_ws():
+    global last_signal
+    uri = "wss://ws.binaryws.com/websockets/v3?app_id=1089"
+    async with websockets.connect(uri) as ws:
+        await ws.send(json.dumps({"ticks": pair}))
+        while True:
+            msg = json.loads(await ws.recv())
+            if "tick" in msg:
+                price = float(msg["tick"]["quote"])
+                prices.append(price)
 
-                        prev_price = price
-                        prev_ma = ma_val
-                await asyncio.sleep(0.5)
+                if len(prices) >= MA_SLOW:
+                    ma50 = np.mean(list(prices)[-MA_FAST:])
+                    ma200 = np.mean(list(prices))
 
-    asyncio.run(deriv_stream())
+                    if ma50 > ma200 and last_signal != "BUY":
+                        send_telegram_signal("BUY", price, pair)
+                        last_signal = "BUY"
+                    elif ma50 < ma200 and last_signal != "SELL":
+                        send_telegram_signal("SELL", price, pair)
+                        last_signal = "SELL"
+            await asyncio.sleep(0.5)
 
-# Jalankan WebSocket di thread agar tidak memblok UI Streamlit
-thread = threading.Thread(target=start_deriv_ws)
-thread.start()
+def run_ws():
+    asyncio.run(deriv_ws())
+
+if st.session_state.running:
+    threading.Thread(target=run_ws, daemon=True).start()
+    st.success("🚀 Bot berjalan realtime dan akan mengirim sinyal jika MA50 cross MA200")
