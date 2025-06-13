@@ -2,60 +2,61 @@ import streamlit as st
 import asyncio
 import websockets
 import json
-from collections import deque
 import numpy as np
+from collections import deque
 
-st.set_page_config(page_title="Sinyal MA Real-time", layout="centered")
-st.title("📡 Sinyal MA Trading Deriv (Real-time Anti-Spam)")
+st.set_page_config(page_title="Sinyal Realtime MA", layout="centered")
+st.title("📡 Realtime Trading Signal - MA Strategy")
 
-symbol = st.selectbox("Pilih Pair", ["frxXAUUSD", "frxUSDJPY", "frxEURUSD", "R_100", "1HZ100V"])
-ma_period = st.slider("Period MA", min_value=3, max_value=20, value=5)
+# UI: Pilihan pair & periode MA
+symbol = st.selectbox("Pilih Pair Deriv", ["frxXAUUSD", "frxUSDJPY", "frxEURUSD", "R_100"], index=0)
+ma_period = st.slider("Period MA", 3, 20, 5)
 
-# State Awal
-if "prices" not in st.session_state:
-    st.session_state.prices = deque(maxlen=ma_period)
-    st.session_state.prev_price = None
-    st.session_state.prev_ma = None
-    st.session_state.last_signal = "WAIT"
+# Komponen display
+price_placeholder = st.empty()
+ma_placeholder = st.empty()
+signal_placeholder = st.empty()
 
-async def fetch_price(symbol):
-    url = "wss://ws.binaryws.com/websockets/v3?app_id=1089"
-    async with websockets.connect(url) as ws:
+# State penyimpanan
+prices = deque(maxlen=ma_period)
+last_signal = "WAIT"
+
+# Fungsi WebSocket Deriv
+async def get_ticks(symbol):
+    global last_signal
+    uri = "wss://ws.binaryws.com/websockets/v3?app_id=1089"
+    async with websockets.connect(uri) as ws:
         await ws.send(json.dumps({"ticks": symbol}))
+        prev_price, prev_ma = None, None
+
         while True:
-            response = await ws.recv()
-            data = json.loads(response)
+            response = json.loads(await ws.recv())
+            if "tick" in response:
+                price = float(response["tick"]["quote"])
+                prices.append(price)
 
-            if "tick" in data:
-                price = float(data["tick"]["quote"])
-                st.session_state.prices.append(price)
+                price_placeholder.metric("Harga", f"{price:.2f}")
 
-                # Hitung MA
-                if len(st.session_state.prices) == ma_period:
-                    ma_now = np.mean(st.session_state.prices)
-                    prev_price = st.session_state.prev_price
-                    prev_ma = st.session_state.prev_ma
+                if len(prices) == ma_period:
+                    ma = np.mean(prices)
+                    ma_placeholder.markdown(f"**MA({ma_period})**: {ma:.2f}")
 
-                    signal = "WAIT"
+                    # Cross logic
                     if prev_price is not None and prev_ma is not None:
-                        if prev_price < prev_ma and price > ma_now:
+                        signal = "WAIT"
+                        if prev_price < prev_ma and price > ma:
                             signal = "BUY"
-                        elif prev_price > prev_ma and price < ma_now:
+                        elif prev_price > prev_ma and price < ma:
                             signal = "SELL"
 
-                    # Tampilkan hanya jika sinyal BUY/SELL berubah
-                    if signal in ["BUY", "SELL"] and signal != st.session_state.last_signal:
-                        st.session_state.last_signal = signal
-                        st.subheader(f"📈 Harga Sekarang: {price}")
-                        st.success(f"💡 Sinyal: {signal}")
-                    
-                    # Simpan nilai sebelumnya
-                    st.session_state.prev_ma = ma_now
-                    st.session_state.prev_price = price
+                        # Tampilkan sinyal hanya saat berubah
+                        if signal != "WAIT" and signal != last_signal:
+                            signal_placeholder.success(f"💡 Sinyal: {signal}")
+                            last_signal = signal
 
-                await asyncio.sleep(0.3)
+                    prev_price = price
+                    prev_ma = ma
+            await asyncio.sleep(0.5)
 
-async def main_loop():
-    await fetch_price(symbol)
-
-asyncio.run(main_loop())
+# Jalankan event loop
+asyncio.run(get_ticks(symbol))
