@@ -19,7 +19,7 @@ last_signal = st.session_state.get("last_signal", "NONE")
 prev_price = None
 prev_ma = None
 
-# UI placeholder
+# Placeholder UI
 price_ph = st.empty()
 ma_ph = st.empty()
 signal_ph = st.empty()
@@ -50,7 +50,15 @@ def start_deriv_ws():
                                 signal = "SELL"
 
                         if signal != "NONE" and signal != last_signal:
-                            signal_ph.success(f"💡 **Sinyal: {signal}**")
+                            signal_ph.success(f'<div id="signal">💡 <b>Sinyal:</b> {signal}</div>', unsafe_allow_html=True)
+                            st.markdown(
+                                """
+                                <script>
+                                    document.getElementById("signal").scrollIntoView({ behavior: 'smooth' });
+                                </script>
+                                """,
+                                unsafe_allow_html=True
+                            )
                             st.session_state["last_signal"] = signal
                             last_signal = signal
 
@@ -60,6 +68,6 @@ def start_deriv_ws():
 
     asyncio.run(deriv_stream())
 
-# Jalankan di thread agar tidak blok UI Streamlit
+# Jalankan WebSocket di thread agar tidak memblok UI Streamlit
 thread = threading.Thread(target=start_deriv_ws)
 thread.start()
