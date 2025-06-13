@@ -2,57 +2,48 @@ import streamlit as st
 import asyncio
 import websockets
 import json
-import threading
 
-st.set_page_config(page_title="Sinyal Deriv Realtime", layout="centered")
-st.title("📡 Sinyal Trading Real-time dari Deriv")
+st.set_page_config(page_title="Sinyal Deriv Real-time", layout="centered")
+st.title("📡 Sinyal Trading Deriv WebSocket")
 
 symbol = st.selectbox("Pilih Pair", ["frxXAUUSD", "frxUSDJPY", "frxEURUSD", "R_100", "1HZ100V"])
 
-st.markdown("### 💡 Sinyal")
-signal_placeholder = st.empty()
+# Inisialisasi session_state
+if "price" not in st.session_state:
+    st.session_state.price = None
+    st.session_state.prev_price = None
+    st.session_state.signal = "⏳ WAIT"
 
-st.markdown("### 💰 Harga Sekarang")
-price_placeholder = st.empty()
-
-# Global untuk menyimpan state harga terakhir
-state = {"prev_price": None, "running": True}
-
-async def deriv_listener(symbol):
+async def fetch_price(symbol):
     url = "wss://ws.binaryws.com/websockets/v3?app_id=1089"
     async with websockets.connect(url) as ws:
         await ws.send(json.dumps({"ticks": symbol}))
-        while state["running"]:
+        while True:
             response = await ws.recv()
             data = json.loads(response)
-
             if "tick" in data:
                 price = float(data["tick"]["quote"])
-                prev = state["prev_price"]
-                state["prev_price"] = price
+                prev = st.session_state.price
+                st.session_state.prev_price = prev
+                st.session_state.price = price
 
-                # Tentukan sinyal
+                # Update sinyal
                 if prev is None:
-                    signal = "⏳ WAIT"
+                    st.session_state.signal = "⏳ WAIT"
                 elif price > prev:
-                    signal = "🔼 BUY"
+                    st.session_state.signal = "🔼 BUY"
                 elif price < prev:
-                    signal = "🔽 SELL"
+                    st.session_state.signal = "🔽 SELL"
                 else:
-                    signal = "⏳ WAIT"
+                    st.session_state.signal = "⏳ WAIT"
+                await asyncio.sleep(1)
 
-                # Update UI
-                price_placeholder.metric(label="Harga Saat Ini", value=price)
-                signal_placeholder.markdown(f"<h2>{signal}</h2>", unsafe_allow_html=True)
+async def main_loop():
+    task = asyncio.create_task(fetch_price(symbol))
+    while True:
+        st.subheader(f"💰 Harga: {st.session_state.price}")
+        st.success(f"Sinyal: {st.session_state.signal}")
+        await asyncio.sleep(1)
 
-def run_loop():
-    asyncio.new_event_loop().run_until_complete(deriv_listener(symbol))
-
-# Jalankan WebSocket listener di thread terpisah
-thread = threading.Thread(target=run_loop)
-thread.start()
-
-# Tombol stop
-if st.button("🛑 Hentikan"):
-    state["running"] = False
-    st.success("Sinyal dihentikan. Silakan refresh untuk memulai ulang.")
+# Jalankan loop utama
+asyncio.run(main_loop())
